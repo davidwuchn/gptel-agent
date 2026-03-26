@@ -1298,30 +1298,32 @@ ARG-VALUES is a list: (type description prompt)"
         (overlay-put ov 'after-string new-info-msg)))))
 
 (defun gptel-agent--task-overlay (where &optional agent-type description)
-  "Create overlay for agent task at WHERE with AGENT-TYPE and DESCRIPTION."
-  (let* ((bounds                  ;where to place the overlay, handle edge cases
-          (save-excursion
-            (goto-char where)
-            (when (bobp) (insert "\n"))
-            (if (and (bolp) (eolp))
-                (cons (1- (point)) (point))
-              (cons (line-beginning-position) (line-end-position)))))
-         (ov (make-overlay (car bounds) (cdr bounds) nil t))
-         (msg (concat
-               (unless (eq (char-after (car bounds)) 10) "\n")
-               "\n" gptel-agent--hrule
-               (propertize (concat (capitalize agent-type) " Task: ")
-                           'face 'font-lock-escape-face)
-               (propertize description 'face 'font-lock-doc-face) "\n")))
-    (prog1 ov
-      (overlay-put ov 'gptel-agent t)
-      (overlay-put ov 'count 0)
-      (overlay-put ov 'msg msg)
-      (overlay-put ov 'line-prefix "")
-      (overlay-put
-       ov 'after-string
-       (concat msg (propertize "Waiting..." 'face 'warning) "\n"
-               gptel-agent--hrule)))))
+  "Create overlay for agent task at WHERE with AGENT-TYPE and DESCRIPTION.
+Returns nil if WHERE is nil (no buffer context available)."
+  (when where
+    (let* ((bounds
+            (save-excursion
+              (goto-char where)
+              (when (bobp) (insert "\n"))
+              (if (and (bolp) (eolp))
+                  (cons (1- (point)) (point))
+                (cons (line-beginning-position) (line-end-position)))))
+           (ov (make-overlay (car bounds) (cdr bounds) nil t))
+           (msg (concat
+                 (unless (eq (char-after (car bounds)) 10) "\n")
+                 "\n" gptel-agent--hrule
+                 (propertize (concat (capitalize agent-type) " Task: ")
+                             'face 'font-lock-escape-face)
+                 (propertize description 'face 'font-lock-doc-face) "\n")))
+      (prog1 ov
+        (overlay-put ov 'gptel-agent t)
+        (overlay-put ov 'count 0)
+        (overlay-put ov 'msg msg)
+        (overlay-put ov 'line-prefix "")
+        (overlay-put
+         ov 'after-string
+         (concat msg (propertize "Waiting..." 'face 'warning) "\n"
+                 gptel-agent--hrule))))))
 
 (defun gptel-agent--task (main-cb agent-type description prompt)
   "Call a gptel agent to do specific compound tasks.
@@ -1346,36 +1348,34 @@ PROMPT is the detailed prompt instructing the agent on what is required."
         :fsm (gptel-make-fsm :table gptel-send--transitions
                              :handlers gptel-agent-request--handlers)
         :transforms (list #'gptel--transform-add-context)
-        :callback
-        (lambda (resp info)
-          (let ((ov (plist-get info :context)))
-            (pcase resp
-              ('nil
-               (delete-overlay ov)
-               (funcall main-cb
-                        (format "Error: Task %s could not finish task \"%s\". \
+:callback
+         (lambda (resp info)
+           (let ((ov (plist-get info :context)))
+             (pcase resp
+               ('nil
+                (when ov (delete-overlay ov))
+                (funcall main-cb
+                         (format "Error: Task %s could not finish task \"%s\". \
 
 Error details: %S"
-                                agent-type description (plist-get info :error))))
-              (`(tool-call . ,calls)
-               (unless (plist-get info :tracking-marker)
-                 (plist-put info :tracking-marker where))
-               (gptel--display-tool-calls calls info))
-              ((pred stringp)
-               (setq partial (concat partial resp))
-               ;; If tool use is pending, the agent isn't done, so we just
-               ;; accumulate output without printing it.  We print at the end.
-               (unless (plist-get info :tool-use)
-                 (delete-overlay ov)
-                 (when-let* ((transformer (plist-get info :transformer)))
-                   (setq partial (funcall transformer partial)))
-                 (funcall main-cb partial)))
-              ('abort
-               (delete-overlay ov)
-               (funcall main-cb
-                        (format "Error: Task \"%s\" was aborted by the user. \
+                                 agent-type description (plist-get info :error))))
+               (`(tool-call . ,calls)
+                (unless (plist-get info :tracking-marker)
+                  (plist-put info :tracking-marker where))
+                (gptel--display-tool-calls calls info))
+               ((pred stringp)
+                (setq partial (concat partial resp))
+                (unless (plist-get info :tool-use)
+                  (when ov (delete-overlay ov))
+                  (when-let* ((transformer (plist-get info :transformer)))
+                    (setq partial (funcall transformer partial)))
+                  (funcall main-cb partial)))
+               ('abort
+                (when ov (delete-overlay ov))
+                (funcall main-cb
+                         (format "Error: Task \"%s\" was aborted by the user. \
 %s could not finish."
-                                description agent-type))))))))))
+                                 description agent-type))))))))))
 
 ;;; Register tool call preview functions
 
