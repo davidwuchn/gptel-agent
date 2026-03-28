@@ -239,6 +239,7 @@ COMMAND is the bash command string to execute."
                   (when (memq (process-status process) '(exit signal))
                     (let* ((exit-code (process-exit-status process))
                            (output (with-current-buffer (process-buffer process)
+                                     (gptel-agent--truncate-buffer "bash")
                                      (buffer-string))))
                       (kill-buffer (process-buffer process))
                       (funcall callback
@@ -370,6 +371,7 @@ COUNT is the number of results to return (default 5)."
              (eww-score-readability dom)
              (shr-insert-document (eww-highest-readability dom))
              (decode-coding-region (point-min) (point-max) 'utf-8)
+             (gptel-agent--truncate-buffer "url")
              (funcall
               cb (buffer-substring-no-properties
                   (point-min) (point-max)))))
@@ -523,14 +525,19 @@ Call CALLBACK with formatted result containing DESCRIPTION and transcript."
                                   error))
                (goto-char (point-min))
                (search-forward "\n\n" nil t)
-               (let* ((xml-string (buffer-substring (point) (point-max)))
+(let* ((xml-string (buffer-substring (point) (point-max)))
                       (caption-dom (gptel-agent--yt-parse-captions xml-string))
                       (formatted-transcript
-                       (gptel-agent--yt-format-captions caption-dom 30)))
+                       (gptel-agent--yt-format-captions caption-dom 30))
+                      (result (format "# Description\n\n%s\n\n# Transcript\n\n%s"
+                                      (or description "No description available.")
+                                      (or formatted-transcript "Error parsing transcript."))))
                  (funcall callback
-                          (format "# Description\n\n%s\n\n# Transcript\n\n%s"
-                                  (or description "No description available.")
-                                  (or formatted-transcript "Error parsing transcript."))))))
+                          (if (> (length result) 20000)
+                              (format "%s\n\n[Transcript truncated, %d chars total]"
+                                      (substring result 0 20000)
+                                      (length result))
+                            result)))))
            (list callback description)))))))
 
 (defun gptel-agent--yt-read-url (callback url)
@@ -1107,6 +1114,7 @@ file.  Results are sorted by modification time."
         (when (/= exit-code 0)
           (goto-char (point-min))
           (insert (format "Error: search failed with exit-code %d.  Tool output:\n\n" exit-code)))
+        (gptel-agent--truncate-buffer "grep")
         (buffer-string)))))
 
 ;;; Todo-write tool (task tracking)
