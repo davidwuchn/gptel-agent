@@ -1020,6 +1020,7 @@ Raises an error if PATTERN is empty, PATH is not readable, or the
 Please specify a line range to read")
         (with-temp-buffer
           (insert-file-contents filename)
+          (gptel-agent--truncate-buffer "read")
           (buffer-string)))
     ;; TODO: Handle nil start-line OR nil end-line
     (cl-decf start-line)
@@ -1057,6 +1058,7 @@ Please specify a line range to read")
                  filename nil byte-offset (+ byte-offset chunk-size))
                 (setq byte-offset (+ byte-offset chunk-size))))))
 
+        (gptel-agent--truncate-buffer "read")
         (buffer-string)))))
 
 (defun gptel-agent--grep (regex path &optional glob context-lines)
