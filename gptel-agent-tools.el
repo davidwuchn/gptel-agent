@@ -595,7 +595,7 @@ diagnostics."
 ;;;; Writing to files
 (defun gptel-agent--edit-files-preview-setup (arg-values _info)
   "Insert tool call preview for ARG-VALUES for \"Edit\" tool."
-  (pcase-let ((from (point)) (files-affected) (description)
+  (pcase-let ((from (point)) (files-affected) (description "Edit")
               (`(,path ,old-str ,new-str-or-diff ,diffp) arg-values))
 
     (if (and diffp (not (eq diffp :json-false)))
@@ -1322,30 +1322,32 @@ ARG-VALUES is a list: (type description prompt)"
         (overlay-put ov 'after-string new-info-msg)))))
 
 (defun gptel-agent--task-overlay (where &optional agent-type description)
-  "Create overlay for agent task at WHERE with AGENT-TYPE and DESCRIPTION."
-  (let* ((bounds                  ;where to place the overlay, handle edge cases
-          (save-excursion
-            (goto-char where)
-            (when (bobp) (insert "\n"))
-            (if (and (bolp) (eolp))
-                (cons (1- (point)) (point))
-              (cons (line-beginning-position) (line-end-position)))))
-         (ov (make-overlay (car bounds) (cdr bounds) nil t))
-         (msg (concat
-               (unless (eq (char-after (car bounds)) 10) "\n")
-               "\n" gptel-agent--hrule
-               (propertize (concat (capitalize agent-type) " Task: ")
-                           'face 'font-lock-escape-face)
-               (propertize description 'face 'font-lock-doc-face) "\n")))
-    (prog1 ov
-      (overlay-put ov 'gptel-agent t)
-      (overlay-put ov 'count 0)
-      (overlay-put ov 'msg msg)
-      (overlay-put ov 'line-prefix "")
-      (overlay-put
-       ov 'after-string
-       (concat msg (propertize "Waiting..." 'face 'warning) "\n"
-               gptel-agent--hrule)))))
+  "Create overlay for agent task at WHERE with AGENT-TYPE and DESCRIPTION.
+Returns nil if WHERE is nil (allows calls from non-gptel contexts)."
+  (when (and where (or (markerp where) (integerp where)))
+    (let* ((bounds                  ;where to place the overlay, handle edge cases
+            (save-excursion
+              (goto-char where)
+              (when (bobp) (insert "\n"))
+              (if (and (bolp) (eolp))
+                  (cons (1- (point)) (point))
+                (cons (line-beginning-position) (line-end-position)))))
+           (ov (make-overlay (car bounds) (cdr bounds) nil t))
+           (msg (concat
+                 (unless (eq (char-after (car bounds)) 10) "\n")
+                 "\n" gptel-agent--hrule
+                 (propertize (concat (capitalize (or agent-type "agent")) " Task: ")
+                             'face 'font-lock-escape-face)
+                 (propertize (or description "working") 'face 'font-lock-doc-face) "\n")))
+      (prog1 ov
+        (overlay-put ov 'gptel-agent t)
+        (overlay-put ov 'count 0)
+        (overlay-put ov 'msg msg)
+        (overlay-put ov 'line-prefix "")
+        (overlay-put
+         ov 'after-string
+         (concat msg (propertize "Waiting..." 'face 'warning) "\n"
+                 gptel-agent--hrule))))))
 
 (defun gptel-agent--task (main-cb agent-type description prompt)
   "Call a gptel agent to do specific compound tasks.
