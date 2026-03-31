@@ -1365,7 +1365,7 @@ PROMPT is the detailed prompt instructing the agent on what is required."
            (where (or (plist-get info :tracking-marker)
                       (plist-get info :position)))
            (partial (format "%s result for task: %s\n\n"
-                            (capitalize agent-type) description)))
+                            (capitalize (or agent-type "agent")) (or description "unknown"))))
       (gptel--update-status " Calling Agent..." 'font-lock-escape-face)
       (gptel-request prompt
         :context (gptel-agent--task-overlay where agent-type description)
