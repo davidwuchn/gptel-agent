@@ -56,6 +56,15 @@
 (defconst gptel-agent--hrule
   (propertize "\n" 'face '(:inherit shadow :underline t :extend t)))
 
+;;; Customizable variables
+(defcustom gptel-agent-read-file-size-threshold 400
+  "Maximum file size in KB above which the \"Read\" tool refuses to read
+the entire file and requires a line range.
+
+Default: 400 KB."
+  :type 'integer
+  :group 'gptel-agent)
+
 ;;; Tool use preview
 (defun gptel-agent--confirm-overlay (from to &optional no-hide)
   "Set up tool call preview overlay FROM TO.
@@ -1017,16 +1026,16 @@ Raises an error if PATTERN is empty, PATH is not readable, or the
 
   (if (and (not start-line) (not end-line)) ;read full file
       (if (> (file-attribute-size (file-attributes filename))
-             (* 512 1024))
-          (error "Error: File is too large (> 512 KB).\
-Please specify a line range to read")
+             (* gptel-agent-read-file-size-threshold 1024))
+          (error "Error: File is too large (> %d KB).Please specify a line range to read"
+                 gptel-agent-read-file-size-threshold)
         (with-temp-buffer
           (insert-file-contents filename)
           (buffer-string)))
     ;; TODO: Handle nil start-line OR nil end-line
     (cl-decf start-line)
     (let* ((file-size (nth 7 (file-attributes filename)))
-           (chunk-size (min file-size (* 512 1024)))
+           (chunk-size (min file-size (* gptel-agent-read-file-size-threshold 1024)))
            (byte-offset 0) (line-offset (- end-line start-line)))
       (with-temp-buffer
         ;; Go to start-line
@@ -1689,14 +1698,15 @@ Use \"*\" to list all files in a directory.")
 
 (gptel-make-tool
  :name "Read"
- :description "Read file contents between specified line numbers `start_line` and `end_line`,
+ :description (format "Read file contents between specified line numbers `start_line` and `end_line`,
 with both ends included.
 
 Consider using the \"Grep\" tool to find the right range to read first.
 
 Reads the whole file if the line range is not provided.
 
-Files over 512 KB in size can only be read by specifying a line range."
+Files over %d KB in size can only be read by specifying a line range."
+                      gptel-agent-read-file-size-threshold)
  :function #'gptel-agent--read-file-lines
  :args '(( :name "file_path"
            :type string
