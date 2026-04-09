@@ -178,7 +178,8 @@ Returns an alist of (agent-name . file-path)."
   (setq gptel-agent--skills nil)
   (mapc (lambda (dir)
           (when (file-directory-p dir)
-            (dolist (skill-file (directory-files-recursively dir "SKILL\\.md"))
+            (dolist (skill-file (directory-files-recursively
+                                 dir "SKILL\\.md" nil nil t))
               (pcase-let ((`(,name . ,skill-plist) ;loading only metadata
                            (gptel-agent-read-file skill-file nil t)))
                 ;; validating skill definition
@@ -511,8 +512,8 @@ this session, which defaults to the default `gptel-agent'."
       (gptel--apply-preset              ;Apply the gptel-agent preset
        (or agent-preset 'gptel-agent)
        (lambda (sym val) (set (make-local-variable sym) val)))
-      (unless gptel-max-tokens          ;Agent tasks typically need
-        (setq gptel-max-tokens 8192))   ;a higher than usual value
+      (unless gptel-max-tokens              ;Agent tasks typically need
+        (setq-local gptel-max-tokens 8192)) ;a higher than usual value
       (when gptel-use-header-line
         (let* ((agent-mode t)
                (switch-mode
