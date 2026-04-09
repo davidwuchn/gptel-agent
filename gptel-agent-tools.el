@@ -1766,7 +1766,8 @@ Only one todo can be `in_progress` at a time."
         :activeForm
         ( :type string :minLength 1
           :description "Present continuous form shown during execution (e.g., 'Running tests')")))))
- :category "gptel-agent")
+ :category "gptel-agent"
+ :include nil)
 
 (gptel-make-tool
  :name "Skill"
