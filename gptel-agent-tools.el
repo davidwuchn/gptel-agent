@@ -65,6 +65,24 @@ Default: 400 KB."
   :type 'integer
   :group 'gptel-agent)
 
+(defcustom gptel-agent-preset nil
+  "gptel preset to apply when calling sub-agents.
+
+If you want sub-agent calls to use a different backend or (typically
+smaller or cheaper) model from the main LLM in use, you can specify it
+here, along with any other gptel settings.
+
+It can specified as the name (a symbol) of a preset defined with
+`gptel-make-preset', or as a plist with preset keys like :backend and
+:model.  See this function for recognized keys and types.
+
+Note that you can also specify these parameters per-agent in the agent
+files, in the Markdown frontmatter or Org properties.  Agent-specific
+parameters take precedence over this value."
+  :type '(choice (symbol :tag "Name of preset")
+                 (plist  :tag "Preset plist spec"))
+  :group 'gptel-agent)
+
 ;;; Tool use preview
 (defun gptel-agent--confirm-overlay (from to &optional no-hide)
   "Set up tool call preview overlay FROM TO.
@@ -250,7 +268,6 @@ COMMAND is the bash command string to execute."
                   (when (memq (process-status process) '(exit signal))
                     (let* ((exit-code (process-exit-status process))
                            (output (with-current-buffer (process-buffer process)
-                                     (gptel-agent--truncate-buffer "bash")
                                      (buffer-string))))
                       (kill-buffer (process-buffer process))
                       (funcall callback
@@ -382,7 +399,6 @@ COUNT is the number of results to return (default 5)."
              (eww-score-readability dom)
              (shr-insert-document (eww-highest-readability dom))
              (decode-coding-region (point-min) (point-max) 'utf-8)
-             (gptel-agent--truncate-buffer "url")
              (funcall
               cb (buffer-substring-no-properties
                   (point-min) (point-max)))))
@@ -536,19 +552,14 @@ Call CALLBACK with formatted result containing DESCRIPTION and transcript."
                                   error))
                (goto-char (point-min))
                (search-forward "\n\n" nil t)
-(let* ((xml-string (buffer-substring (point) (point-max)))
+               (let* ((xml-string (buffer-substring (point) (point-max)))
                       (caption-dom (gptel-agent--yt-parse-captions xml-string))
                       (formatted-transcript
-                       (gptel-agent--yt-format-captions caption-dom 30))
-                      (result (format "# Description\n\n%s\n\n# Transcript\n\n%s"
-                                      (or description "No description available.")
-                                      (or formatted-transcript "Error parsing transcript."))))
+                       (gptel-agent--yt-format-captions caption-dom 30)))
                  (funcall callback
-                          (if (> (length result) 20000)
-                              (format "%s\n\n[Transcript truncated, %d chars total]"
-                                      (substring result 0 20000)
-                                      (length result))
-                            result)))))
+                          (format "# Description\n\n%s\n\n# Transcript\n\n%s"
+                                  (or description "No description available.")
+                                  (or formatted-transcript "Error parsing transcript."))))))
            (list callback description)))))))
 
 (defun gptel-agent--yt-read-url (callback url)
@@ -606,7 +617,7 @@ diagnostics."
 ;;;; Writing to files
 (defun gptel-agent--edit-files-preview-setup (arg-values _info)
   "Insert tool call preview for ARG-VALUES for \"Edit\" tool."
-  (pcase-let ((from (point)) (files-affected) (description "Edit")
+  (pcase-let ((from (point)) (files-affected) (description)
               (`(,path ,old-str ,new-str-or-diff ,diffp) arg-values))
 
     (if (and diffp (not (eq diffp :json-false)))
@@ -1038,7 +1049,6 @@ Raises an error if PATTERN is empty, PATH is not readable, or the
                  gptel-agent-read-file-size-threshold)
         (with-temp-buffer
           (insert-file-contents filename)
-          (gptel-agent--truncate-buffer "read")
           (buffer-string)))
     ;; TODO: Handle nil start-line OR nil end-line
     (cl-decf start-line)
@@ -1076,7 +1086,6 @@ Raises an error if PATTERN is empty, PATH is not readable, or the
                  filename nil byte-offset (+ byte-offset chunk-size))
                 (setq byte-offset (+ byte-offset chunk-size))))))
 
-        (gptel-agent--truncate-buffer "read")
         (buffer-string)))))
 
 (defun gptel-agent--grep (regex path &optional glob context-lines)
@@ -1125,7 +1134,6 @@ file.  Results are sorted by modification time."
         (when (/= exit-code 0)
           (goto-char (point-min))
           (insert (format "Error: search failed with exit-code %d.  Tool output:\n\n" exit-code)))
-        (gptel-agent--truncate-buffer "grep")
         (buffer-string)))))
 
 ;;; Todo-write tool (task tracking)
@@ -1333,32 +1341,39 @@ ARG-VALUES is a list: (type description prompt)"
         (overlay-put ov 'after-string new-info-msg)))))
 
 (defun gptel-agent--task-overlay (where &optional agent-type description)
-  "Create overlay for agent task at WHERE with AGENT-TYPE and DESCRIPTION.
-Returns nil if WHERE is nil (allows calls from non-gptel contexts)."
-  (when (and where (or (markerp where) (integerp where)))
-    (let* ((bounds                  ;where to place the overlay, handle edge cases
-            (save-excursion
-              (goto-char where)
-              (when (bobp) (insert "\n"))
-              (if (and (bolp) (eolp))
-                  (cons (1- (point)) (point))
-                (cons (line-beginning-position) (line-end-position)))))
-           (ov (make-overlay (car bounds) (cdr bounds) nil t))
-           (msg (concat
-                 (unless (eq (char-after (car bounds)) 10) "\n")
-                 "\n" gptel-agent--hrule
-                 (propertize (concat (capitalize (or agent-type "agent")) " Task: ")
-                             'face 'font-lock-escape-face)
-                 (propertize (or description "working") 'face 'font-lock-doc-face) "\n")))
-      (prog1 ov
-        (overlay-put ov 'gptel-agent t)
-        (overlay-put ov 'count 0)
-        (overlay-put ov 'msg msg)
-        (overlay-put ov 'line-prefix "")
-        (overlay-put
-         ov 'after-string
-         (concat msg (propertize "Waiting..." 'face 'warning) "\n"
-                 gptel-agent--hrule))))))
+  "Create overlay for agent task at WHERE with AGENT-TYPE and DESCRIPTION."
+  (let* ((bounds                  ;where to place the overlay, handle edge cases
+          (save-excursion
+            (goto-char where)
+            (when (bobp) (insert "\n"))
+            (if (and (bolp) (eolp))
+                (cons (1- (point)) (point))
+              (cons (line-beginning-position) (line-end-position)))))
+         (ov (make-overlay (car bounds) (cdr bounds) nil t))
+         (model
+          (propertize (concat (gptel--model-name gptel-model))
+                      'face 'font-lock-comment-face))
+         (msg (concat
+               (unless (eq (char-after (car bounds)) 10) "\n")
+               "\n" gptel-agent--hrule
+               (propertize (concat (capitalize agent-type) " Task: ")
+                           'face 'font-lock-escape-face)
+               (propertize description 'face 'font-lock-doc-face)
+               (propertize
+                " " 'display
+                (if (fboundp 'string-pixel-width)
+                    `(space :align-to (- right (,(string-pixel-width model))))
+                  `(space :align-to (- right ,(+ 5 (string-width model))))))
+               model "\n")))
+    (prog1 ov
+      (overlay-put ov 'gptel-agent t)
+      (overlay-put ov 'count 0)
+      (overlay-put ov 'msg msg)
+      (overlay-put ov 'line-prefix "")
+      (overlay-put
+       ov 'after-string
+       (concat msg (propertize "Waiting..." 'face 'warning) "\n"
+               gptel-agent--hrule)))))
 
 (defun gptel-agent--task (main-cb agent-type description prompt)
   "Call a gptel agent to do specific compound tasks.
@@ -1370,13 +1385,18 @@ PROMPT is the detailed prompt instructing the agent on what is required."
   (gptel-with-preset
       (nconc (list :include-reasoning nil
                    :use-tools t
-                   :context nil)        ;Can be overriden by agent
-             (cdr (assoc agent-type gptel-agent--agents)))
+                   :context nil)       ;Can be overriden by agent
+              (and gptel-agent-preset
+                   (copy-sequence
+                    (cl-etypecase gptel-agent-preset
+                      (symbol (gptel-get-preset gptel-agent-preset))
+                      (plist gptel-agent-preset))))
+              (cdr (assoc agent-type gptel-agent--agents)))
     (let* ((info (gptel-fsm-info gptel--fsm-last))
            (where (or (plist-get info :tracking-marker)
                       (plist-get info :position)))
            (partial (format "%s result for task: %s\n\n"
-                            (capitalize (or agent-type "agent")) (or description "unknown"))))
+                            (capitalize agent-type) description)))
       (gptel--update-status " Calling Agent..." 'font-lock-escape-face)
       (gptel-request prompt
         :context (gptel-agent--task-overlay where agent-type description)
