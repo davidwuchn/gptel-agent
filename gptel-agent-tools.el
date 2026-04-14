@@ -268,13 +268,15 @@ COMMAND is the bash command string to execute."
                   (when (memq (process-status process) '(exit signal))
                     (let* ((exit-code (process-exit-status process))
                            (output (with-current-buffer (process-buffer process)
-                                     (buffer-string))))
+                                      (buffer-string))))
                       (kill-buffer (process-buffer process))
                       (funcall callback
-                               (if (zerop exit-code)
-                                   output
-                                 (format "Command failed with exit code %d:\nSTDOUT+STDERR:\n%s"
-                                         exit-code output)))))))))
+                               (gptel-agent--truncate-string
+                                "bash"
+                                (if (zerop exit-code)
+                                    output
+                                  (format "Command failed with exit code %d:\nSTDOUT+STDERR:\n%s"
+                                          exit-code output))))))))))
     proc))
 
 ;;; Web tools
@@ -389,22 +391,23 @@ COUNT is the number of results to return (default 5)."
 ;;;; Read URLs
 (defun gptel-agent--read-url (tool-cb url)
   "Fetch URL text and call TOOL-CB with it."
-  (gptel-agent--fetch-with-timeout
-   url
-   (lambda (cb)
-     (goto-char (point-min)) (forward-paragraph)
-     (condition-case errdata
-         (let ((dom (libxml-parse-html-region (point) (point-max))))
-           (with-temp-buffer
-             (eww-score-readability dom)
-             (shr-insert-document (eww-highest-readability dom))
-             (decode-coding-region (point-min) (point-max) 'utf-8)
-             (funcall
-              cb (buffer-substring-no-properties
-                  (point-min) (point-max)))))
-       (error (funcall cb (format "Error: Request failed with error data:\n%S"
-                                  errdata)))))
-   tool-cb (format "Fetch for \"%s\"" url)))
+  (let ((tool-cb (gptel-agent--truncate-callback tool-cb "webfetch")))
+    (gptel-agent--fetch-with-timeout
+     url
+     (lambda (cb)
+       (goto-char (point-min)) (forward-paragraph)
+       (condition-case errdata
+           (let ((dom (libxml-parse-html-region (point) (point-max))))
+             (with-temp-buffer
+               (eww-score-readability dom)
+               (shr-insert-document (eww-highest-readability dom))
+               (decode-coding-region (point-min) (point-max) 'utf-8)
+               (funcall
+                cb (buffer-substring-no-properties
+                    (point-min) (point-max)))))
+         (error (funcall cb (format "Error: Request failed with error data:\n%S"
+                                    errdata)))))
+     tool-cb (format "Fetch for \"%s\"" url))))
 
 ;;;; Fetch youtube transcript
 (defun gptel-agent--yt-parse-captions (xml-string)
@@ -566,16 +569,17 @@ Call CALLBACK with formatted result containing DESCRIPTION and transcript."
   "Fetch YouTube metadata and transcript for URL, calling CALLBACK with result.
 CALLBACK is called with a markdown-formatted string containing the video
 description and transcript formatted as timestamped paragraphs."
-  (if-let* ((video-id
-             (and (string-match
-                   (rx bol (opt "http" (opt "s") "://")
-                       (opt "www.") "youtu" (or ".be" "be.com") "/"
-                       (opt "watch?v=")
-                       (group (one-or-more (not (any "?&")))))
-                   url)
-                  (match-string 1 url))))
-      (gptel-agent--yt-fetch-watch-page callback video-id)
-    (funcall callback "Error: Invalid YouTube URL")))
+  (let ((callback (gptel-agent--truncate-callback callback "youtube")))
+    (if-let* ((video-id
+               (and (string-match
+                     (rx bol (opt "http" (opt "s") "://")
+                         (opt "www.") "youtu" (or ".be" "be.com") "/"
+                         (opt "watch?v=")
+                         (group (one-or-more (not (any "?&")))))
+                     url)
+                    (match-string 1 url))))
+        (gptel-agent--yt-fetch-watch-page callback video-id)
+      (funcall callback "Error: Invalid YouTube URL"))))
 
 ;;; Code tools
 ;;;; Diagnostics from flymake
@@ -988,9 +992,28 @@ MAX-LINES is the number of lines to keep, defaulting to 50."
       (forward-line max-lines)
       (delete-region (point) (point-max))
       ;; Add footer with read instruction
-      (goto-char (point-max))
-      (insert (format "\n\n[Use Read tool with file_path=\"%s\" to view full results]"
-                      temp-file)))))
+       (goto-char (point-max))
+       (insert (format "\n\n[Use Read tool with file_path=\"%s\" to view full results]"
+                       temp-file)))))
+
+(defun gptel-agent--truncate-string (prefix text &optional max-lines)
+  "Return TEXT truncated via `gptel-agent--truncate-buffer' when needed.
+
+PREFIX and MAX-LINES are passed through to `gptel-agent--truncate-buffer'."
+  (if (not (stringp text))
+      text
+    (with-temp-buffer
+      (insert text)
+      (gptel-agent--truncate-buffer prefix max-lines)
+      (buffer-string))))
+
+(defun gptel-agent--truncate-callback (callback prefix &optional max-lines)
+  "Wrap CALLBACK so large string results spill to a temp artifact.
+
+PREFIX and MAX-LINES are passed through to `gptel-agent--truncate-string'."
+  (lambda (result)
+    (funcall callback
+             (gptel-agent--truncate-string prefix result max-lines))))
 
 (defun gptel-agent--glob (pattern &optional path depth)
   "Find files matching PATTERN using the `tree' command.
@@ -1047,9 +1070,11 @@ Raises an error if PATTERN is empty, PATH is not readable, or the
              (* gptel-agent-read-file-size-threshold 1024))
           (error "Error: File is too large (> %d KB).Please specify a line range to read"
                  gptel-agent-read-file-size-threshold)
-        (with-temp-buffer
-          (insert-file-contents filename)
-          (buffer-string)))
+        (gptel-agent--truncate-string
+         "read"
+         (with-temp-buffer
+           (insert-file-contents filename)
+           (buffer-string))))
     ;; TODO: Handle nil start-line OR nil end-line
     (cl-decf start-line)
     (let* ((file-size (nth 7 (file-attributes filename)))
@@ -1086,7 +1111,7 @@ Raises an error if PATTERN is empty, PATH is not readable, or the
                  filename nil byte-offset (+ byte-offset chunk-size))
                 (setq byte-offset (+ byte-offset chunk-size))))))
 
-        (buffer-string)))))
+        (gptel-agent--truncate-string "read" (buffer-string))))))
 
 (defun gptel-agent--grep (regex path &optional glob context-lines)
   "Search for REGEX in file or directory at PATH using ripgrep.
@@ -1134,7 +1159,7 @@ file.  Results are sorted by modification time."
         (when (/= exit-code 0)
           (goto-char (point-min))
           (insert (format "Error: search failed with exit-code %d.  Tool output:\n\n" exit-code)))
-        (buffer-string)))))
+        (gptel-agent--truncate-string "grep" (buffer-string))))))
 
 ;;; Todo-write tool (task tracking)
 (defvar-local gptel-agent--todos nil)
