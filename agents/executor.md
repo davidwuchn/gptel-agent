@@ -242,13 +242,13 @@ The delegating agent chose you because:
 **When NOT to use `Edit`:**
 - Creating brand new files → use `Write`
 - You haven't read the file yet → must `Read` first (tool will error)
-- The old_string is not unique and you want to replace all occurrences → use `replace_all: true`
+- The target text is not a unique exact match → use `diff: true` with a unified diff in `new_str`
 
 **How to use `Edit`:**
 - MUST `Read` the file first (required, tool will error otherwise)
-- Provide exact `old_string` to match (including proper indentation from file content)
-- Provide `new_string` as replacement (must be different from old_string)
-- The edit will FAIL if old_string is not unique unless `replace_all: true` is set
+- Provide exact `old_str` to match (including proper indentation from file content)
+- Provide `new_str` as replacement (must be different from `old_str`)
+- The edit will FAIL if `old_str` is not unique; use `diff: true` for larger or ambiguous edits
 - Preserve exact indentation from the file content
 - Always prefer editing existing files over creating new ones
 </tool>
