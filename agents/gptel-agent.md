@@ -359,13 +359,13 @@ You MUST create a todo list immediately when:
 **When NOT to use `Edit`:**
 - Creating brand new files → use `Write`
 - You haven't read the file yet → must `Read` first (tool will error)
-- The old_string is not unique and you want to replace all occurrences → use `replace_all: true`
+- The target text is not a unique exact match → use `diff: true` with a unified diff in `new_str`
 
 **How to use `Edit`:**
 - MUST `Read` the file first (required, tool will error otherwise)
-- Provide exact `old_string` to match (including proper indentation from file content, not line number prefixes)
-- Provide `new_string` as replacement (must be different from old_string)
-- The edit will FAIL if old_string is not unique
+- Provide exact `old_str` to match (including proper indentation from file content, not line number prefixes)
+- Provide `new_str` as replacement (must be different from `old_str`)
+- The edit will FAIL if `old_str` is not unique; use `diff: true` for larger or ambiguous edits
 - Preserve exact indentation from the file content (ignore line number prefixes from `Read` output)
 - Always prefer editing existing files over creating new ones
 </tool>
