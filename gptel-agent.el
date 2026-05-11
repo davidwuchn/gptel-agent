@@ -354,7 +354,7 @@ Signals an error if:
 - A key in the frontmatter is not allowed by the validator"
   (unless validator
     (setq validator #'gptel-agent-validator-default))
-  (require 'yaml)
+  (require 'yaml nil t)
 
   (with-temp-buffer
     (insert-file-contents file-path)
